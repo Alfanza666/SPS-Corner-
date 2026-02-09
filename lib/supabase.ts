@@ -1,5 +1,4 @@
-
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@^2.39.7';
+import { createClient } from '@supabase/supabase-js';
 
 /**
  * Helper to safely access environment variables in various environments (Vite, CRA, Node).
