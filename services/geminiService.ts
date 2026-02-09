@@ -1,27 +1,30 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Helper for safe env access (duplicated to avoid circular dependencies/complex imports in this simple setup)
+// Helper untuk mengambil API Key dengan aman
 const getApiKey = (): string => {
-  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) return process.env.API_KEY;
-  try {
-    // @ts-ignore
-    if (typeof import.meta !== 'undefined' && import.meta.env) {
-      // @ts-ignore
-      return import.meta.env.API_KEY || import.meta.env.VITE_API_KEY;
-    }
-  } catch (e) {}
+  // Cek process.env.API_KEY (dari define vite.config)
+  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+    return process.env.API_KEY;
+  }
+  // Cek VITE_GOOGLE_API_KEY standard
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GOOGLE_API_KEY) {
+    return import.meta.env.VITE_GOOGLE_API_KEY;
+  }
   return '';
 };
 
-// Lazy initialization to prevent top-level crashes
 let aiInstance: GoogleGenAI | null = null;
 
 const getAiClient = () => {
+  const apiKey = getApiKey();
+
+  if (!apiKey) {
+    // Jangan console.error di sini agar tidak spam log saat app load
+    return null;
+  }
+  
   if (!aiInstance) {
-    const apiKey = getApiKey();
-    // Using a fallback dummy key to allow instantiation; actual calls will fail gracefully if key is invalid
-    aiInstance = new GoogleGenAI({ apiKey: apiKey || 'dummy_key' });
+    aiInstance = new GoogleGenAI({ apiKey: apiKey });
   }
   return aiInstance;
 }
@@ -32,7 +35,7 @@ export interface ValidationResult {
   amountMatch: boolean;
   dateFound: boolean;
   senderNameMatch?: boolean;
-  confidenceScore: number; // 0-100
+  confidenceScore: number;
   reason: string;
 }
 
@@ -41,47 +44,38 @@ export const validatePaymentProof = async (
   expectedAmount: number,
   buyerName?: string
 ): Promise<ValidationResult> => {
-  const apiKey = getApiKey();
   
-  // Check Key availability before calling API
-  if (!apiKey || apiKey === 'dummy_key_to_prevent_crash') {
-    console.error("Gemini API Key is missing.");
-    return {
-      isValid: false,
-      merchantNameFound: false,
-      amountMatch: false,
-      dateFound: false,
-      confidenceScore: 0,
-      reason: "Sistem Error: API Key AI belum dikonfigurasi. Hubungi Admin."
-    };
+  const ai = getAiClient();
+
+  if (!ai) {
+    console.error("API Key Missing");
+    throw new Error("Google API Key belum dikonfigurasi. Pastikan Variable Environment VITE_GOOGLE_API_KEY atau API_KEY sudah diset di Vercel.");
   }
 
   try {
-    const ai = getAiClient();
-    const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg);base64,/, "");
+    // Clean base64 string
+    const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
 
-    const prompt = `
-      You are an automated receipt scanner assistant for a digital kiosk.
-      Analyze the provided image of a payment receipt/transfer proof.
+    const promptText = `
+      Anda adalah auditor keuangan. Analisis bukti transfer/pembayaran ini.
       
-      Expected Transaction Details:
-      - Target Amount: Rp ${expectedAmount.toLocaleString('id-ID')}
-      - Payer Name: "${buyerName || 'Any'}"
+      Data yang diharapkan:
+      - Nominal: Rp ${expectedAmount}
+      - Nama Pengirim (Opsional): ${buyerName || 'Tidak spesifik'}
+      - Tanggal: Hari ini
       
-      Instructions:
-      1. Extract the transaction amount. Does it match ${expectedAmount}?
-      2. Find the date and time of the transaction.
-      3. Look for the sender's name and check if it relates to "${buyerName}".
-      4. Verify if this looks like a valid bank transfer or QRIS success screen.
+      Instruksi:
+      1. Cari nominal pembayaran. Apakah cocok dengan ${expectedAmount}?
+      2. Cek apakah ini struk yang valid/asli dan bukan editan kasar.
+      3. Berikan alasan validasi dalam bahasa Indonesia.
     `;
 
-    // Use responseSchema for robust JSON output as per @google/genai guidelines
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash-latest',
       contents: {
         parts: [
           { inlineData: { mimeType: 'image/jpeg', data: cleanBase64 } },
-          { text: prompt }
+          { text: promptText }
         ]
       },
       config: {
@@ -89,57 +83,37 @@ export const validatePaymentProof = async (
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            isValid: {
-              type: Type.BOOLEAN,
-              description: 'True if the receipt is a valid proof of payment for the correct amount.',
-            },
-            merchantNameFound: {
-              type: Type.BOOLEAN,
-              description: 'Whether the merchant or destination bank/entity was found.',
-            },
-            amountMatch: {
-              type: Type.BOOLEAN,
-              description: 'Whether the numerical amount in the receipt matches the expected target amount.',
-            },
-            dateFound: {
-              type: Type.BOOLEAN,
-              description: 'Whether a transaction date and time were identified.',
-            },
-            senderNameMatch: {
-              type: Type.BOOLEAN,
-              description: 'Whether the sender/payer name matches the provided user name.',
-            },
-            confidenceScore: {
-              type: Type.NUMBER,
-              description: 'Level of confidence in the validation, from 0 to 100.',
-            },
-            reason: {
-              type: Type.STRING,
-              description: 'Detailed explanation in Indonesian regarding the validation status.',
-            }
-          },
-          required: ["isValid", "merchantNameFound", "amountMatch", "dateFound", "confidenceScore", "reason"],
+            isValid: { type: Type.BOOLEAN },
+            merchantNameFound: { type: Type.BOOLEAN },
+            amountMatch: { type: Type.BOOLEAN },
+            dateFound: { type: Type.BOOLEAN },
+            senderNameMatch: { type: Type.BOOLEAN },
+            confidenceScore: { type: Type.NUMBER },
+            reason: { type: Type.STRING }
+          }
         }
       }
     });
 
     const responseText = response.text;
-    if (!responseText) {
-      throw new Error("Invalid response format from AI");
-    }
+    if (!responseText) throw new Error("AI tidak memberikan respon.");
     
     return JSON.parse(responseText.trim()) as ValidationResult;
 
-  } catch (error) {
-    console.error("Gemini Validation Error:", error);
+  } catch (error: any) {
+    console.error("Gemini AI Error:", error);
+    
+    let reason = "Gagal menghubungi layanan AI.";
+    if (error.message?.includes("API_KEY")) reason = "API Key Salah/Hilang.";
+    if (error.message?.includes("429")) reason = "Terlalu banyak request (Quota Exceeded).";
+    
     return {
       isValid: false,
       merchantNameFound: false,
       amountMatch: false,
       dateFound: false,
-      senderNameMatch: false,
       confidenceScore: 0,
-      reason: "Gagal memproses gambar. Pastikan foto bukti bayar terlihat jelas dan terang."
+      reason: reason
     };
   }
 };
