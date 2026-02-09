@@ -1,0 +1,8 @@
+{
+  "name": "Kantin Federasi Digital",
+  "description": "A self-service kiosk and management system for employee cooperative, featuring AI-powered payment validation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
