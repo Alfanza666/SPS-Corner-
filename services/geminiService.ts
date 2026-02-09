@@ -1,7 +1,30 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Helper for safe env access (duplicated to avoid circular dependencies/complex imports in this simple setup)
+const getApiKey = (): string => {
+  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) return process.env.API_KEY;
+  try {
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+      // @ts-ignore
+      return import.meta.env.API_KEY || import.meta.env.VITE_API_KEY;
+    }
+  } catch (e) {}
+  return '';
+};
+
+// Lazy initialization to prevent top-level crashes
+let aiInstance: GoogleGenAI | null = null;
+
+const getAiClient = () => {
+  if (!aiInstance) {
+    const apiKey = getApiKey();
+    // Using a fallback dummy key to allow instantiation; actual calls will fail gracefully if key is invalid
+    aiInstance = new GoogleGenAI({ apiKey: apiKey || 'dummy_key' });
+  }
+  return aiInstance;
+}
 
 export interface ValidationResult {
   isValid: boolean;
@@ -18,7 +41,23 @@ export const validatePaymentProof = async (
   expectedAmount: number,
   buyerName?: string
 ): Promise<ValidationResult> => {
+  const apiKey = getApiKey();
+  
+  // Check Key availability before calling API
+  if (!apiKey || apiKey === 'dummy_key_to_prevent_crash') {
+    console.error("Gemini API Key is missing.");
+    return {
+      isValid: false,
+      merchantNameFound: false,
+      amountMatch: false,
+      dateFound: false,
+      confidenceScore: 0,
+      reason: "Sistem Error: API Key AI belum dikonfigurasi. Hubungi Admin."
+    };
+  }
+
   try {
+    const ai = getAiClient();
     const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg);base64,/, "");
 
     const prompt = `
