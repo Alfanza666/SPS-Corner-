@@ -1,7 +1,7 @@
 export enum UserRole {
-  GUEST = 'GUEST', // Kiosk Mode
-  SELLER = 'SELLER', // Karyawan
-  ADMIN = 'ADMIN' // SPS Account
+  GUEST = 'GUEST',
+  SELLER = 'SELLER',
+  ADMIN = 'ADMIN'
 }
 
 export enum ProductCategory {
@@ -31,19 +31,18 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
-  balance: number; // Current sales balance
+  balance: number;
 }
 
 export interface WithdrawalRequest {
   id: string;
   sellerId: string;
   sellerName: string;
-  amount: number; // Gross amount
-  fee: number; // 7-8%
-  netAmount: number; // Amount to transfer
+  amount: number;
+  fee: number;
+  netAmount: number;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   requestDate: string;
-  proofImageUrl?: string;
 }
 
 export interface Transaction {
@@ -55,4 +54,27 @@ export interface Transaction {
   buyerName: string;
   sellerId: string;
   status: 'COMPLETED';
+}
+
+// Helper interface for DB inserts/reads
+export interface TransactionDB {
+  id: string;
+  created_at?: string;
+  buyer_name: string;
+  total_amount: number;
+  items: any; // JSONB
+  seller_id: string;
+  status: string;
+}
+
+export interface ProductDB {
+  id: string;
+  created_at?: string;
+  name: string;
+  description: string;
+  price: number;
+  stock: number;
+  category: string;
+  image_url: string;
+  seller_id: string;
 }
